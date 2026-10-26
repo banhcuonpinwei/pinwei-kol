@@ -7,7 +7,8 @@
   var esc = PW.esc;
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 15;
-  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
+  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '',
+    glossaryOpen: window.innerWidth >= 760 }; // the glossary starts closed on a phone, where it is long
 
   function showError(err) {
     $('main').innerHTML = err && err.auth ? PW.noKeyHtml() : '<p class="note bad">' + esc(err && err.message || err) + '</p>';
@@ -47,12 +48,43 @@
     return list;
   }
 
-  /** "Food yes · HCMC yes (all branches)" from the classification (by hand marked). */
+  /** "Food yes · HCMC yes (all branches)" from the classification (by hand marked); the AI's reason on hover. */
   function classLine(cl) {
     if (!cl) return '';
     var all = cl.based_in_hcmc === 'yes' ? ' (all branches)' : '';
     return '<div class="small cls" title="' + esc(cl.reason) + '">Food ' + esc(cl.is_food_reviewer) + ' · HCMC ' + esc(cl.based_in_hcmc) + all +
       ' · ads ' + esc(cl.ad_density) + ' · tone ' + esc(cl.tone_fit) + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
+  }
+
+  /** What every word on the list means, with this sheet's own Config numbers. */
+  function glossary(cfg) {
+    var n = function (x) { return Number(x).toLocaleString('en-US'); };
+    var pct = function (x) { return Math.round(Number(x) * 1000) / 10 + '%'; };
+    var w = cfg.weights || {};
+    var rows = [
+      ['Food', '<b>yes</b>: food or drinks (dishes, restaurants, cafés, street food, milk tea) are a regular part of the posts, about a third ' +
+        'or more, even mixed with travel, vlogs or comedy. <b>no</b>: food is rare. <b>unsure</b>: too little to tell.'],
+      ['HCMC', '<b>yes</b>: the bio or everyday posts place them in Ho Chi Minh City (trips elsewhere do not count against it); ' +
+        'such a creator is for <b>all three branches</b>. <b>no</b>: everyday life clearly in another city. <b>unsure</b>: no place named.'],
+      ['ads', 'Share of posts that are paid ads or sponsored (hợp tác, tài trợ, discount codes, shop links): <b>low</b> under 20%, ' +
+        '<b>medium</b> 20-50%, <b>high</b> over 50%. Fewer ads, more trusted reviews.'],
+      ['tone', 'How the posts would sound for a family bánh cuốn shop: <b>good</b> friendly, warm, honest or funny; <b>ok</b> neutral or ' +
+        'mostly other topics; <b>poor</b> crude, misleading or luxury-only.'],
+      ['Score', '0-100, the weighted mean of the parts below that have data (weights in Config: engagement ' + w.engagement + ', growth ' +
+        w.growth + ', size ' + w.size + ', fit ' + w.fit + '). No follower count, no score. Hover a classification to see the AI\'s reason.'],
+      ['engagement', 'Instagram: (avg likes + avg comments) / followers, full marks at ' + pct(cfg.er_target_ig) + '. TikTok: avg views / followers, ' +
+        'full marks at ' + pct(cfg.er_target_tiktok) + '. From the recent posts the bookmark read.'],
+      ['growth', 'Followers gained per week, between the newest saved numbers and ones at least 7 days older; full marks at ' +
+        pct(cfg.growth_target_weekly) + ' a week. "no growth yet" until a second capture a week later.'],
+      ['size', '<b>nano</b> ' + n(cfg.follower_min) + '-' + n(cfg.nano_max) + ' followers, <b>micro</b> up to ' + n(cfg.follower_max) +
+        ', <b>out</b> outside that range.'],
+      ['fit', 'From ads and tone (few ads and a good tone score highest); "unsure" about food or HCMC takes off 20%.'],
+      ['Red text', 'Excluded and why: verified account, outside the follower range, not a food creator or not based in HCMC. The score is kept to compare.'],
+      ['Numbers saved', 'Days with a capture of the numbers (one per day). Capture the same creator again a week later to measure growth.'],
+      ['Status', '<b>New</b> just added, <b>Classified</b> the AI or a person classified it; Approved, Rejected and Archived come with the review step.'],
+    ];
+    return '<details class="card glossary"' + (state.glossaryOpen ? ' open' : '') + '><summary>What the words on this list mean</summary><table class="list"><tbody>' +
+      rows.map(function (r) { return '<tr><th>' + esc(r[0]) + '</th><td>' + r[1] + '</td></tr>'; }).join('') + '</tbody></table></details>';
   }
 
   function scoreCell(c) {
@@ -119,6 +151,7 @@
           '<button type="button" class="alt" id="cnext"' + (state.page >= pages - 1 ? ' disabled' : '') + '>Next</button></div>');
       }
     }
+    if (d.creators.length) out.push(glossary(d.score_config));
     $('main').innerHTML = out.join('');
     bind();
   }
@@ -126,6 +159,9 @@
   function bind() {
     PW.remember('pwkol_by', $('cwho'));
     document.querySelector('.addcreator').addEventListener('toggle', function () { state.addOpen = this.open; });
+    if (document.querySelector('.glossary')) {
+      document.querySelector('.glossary').addEventListener('toggle', function () { state.glossaryOpen = this.open; });
+    }
     $('csearch').addEventListener('input', function () {
       state.search = this.value;
       state.page = 0;
