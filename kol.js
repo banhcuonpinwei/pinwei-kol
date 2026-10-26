@@ -59,7 +59,7 @@
       '<select id="cstatus" aria-label="Status">' + options(d.statuses, state.status, 'All statuses') + '</select>' +
       '<label for="cwho">Saved by</label><input type="text" id="cwho" maxlength="60" placeholder="Your name" list="people">' +
       '<datalist id="people">' + d.people.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist></div>');
-    out.push('<details class="card addcreator"' + (d.creators.length && !state.addOpen ? '' : ' open') + '><summary>Add a creator</summary><div class="grid">' +
+    out.push('<details class="card addcreator"' + (d.creators.length && !state.addOpen ? '' : ' open') + '><summary>Add a creator</summary><div class="agrid">' +
       '<div><label for="aurl">Instagram or TikTok profile link</label><input type="url" id="aurl" placeholder="https://www.instagram.com/… or https://www.tiktok.com/@…"></div>' +
       '<div><label for="afollowers">Followers (optional)</label><input type="text" id="afollowers" placeholder="e.g. 12,3K"></div>' +
       '<div><label for="anote">Note (optional)</label><input type="text" id="anote" maxlength="500"></div>' +
