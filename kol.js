@@ -232,6 +232,7 @@
   /** Who gave an answer: "counted" when the counts decided it, else the AI or a person. */
   function decidedBy(cl, label) {
     if (cl.by === 'manual') return 'Set by hand.';
+    if (cl.by === 'counts') return 'Decided by counting the captions (the counts were clear, so no AI).';
     return new RegExp('counts: [^;]*' + label).test(cl.method) ? 'Decided by counting the captions.' : 'Judged by the AI (the counts were not clear).';
   }
 
@@ -250,9 +251,11 @@
     var ads = hint('ads ' + esc(cl.ad_density),
       'Share of posts that are paid or sponsored (hợp tác, tài trợ, #ad, discount codes, shop links).\nlow under 20%, medium 20-50%, high over 50%.\n' +
       (n ? cl.ad_posts + ' of ' + n + ' recent captions look sponsored.\n' : '') + decidedBy(cl, 'ads'));
-    var tone = hint('tone ' + esc(cl.tone_fit),
-      'How the posts would sound for a family bánh cuốn shop: good = friendly, warm, honest or funny; ok = neutral; poor = crude, misleading ' +
-      'or luxury only.\n' + (cl.by === 'manual' ? 'Set by hand.' : 'The AI\'s judgment: ' + cl.reason));
+    var toneHelp = 'How the posts would sound for a family bánh cuốn shop: good = friendly, warm, honest or funny; ok = neutral; poor = crude, misleading ' +
+      'or luxury only.\n';
+    var tone = cl.tone_fit ? hint('tone ' + esc(cl.tone_fit), toneHelp + (cl.by === 'manual' ? 'Set by hand.' : 'The AI\'s judgment: ' + cl.reason))
+      : hint('<span class="muted">tone not judged</span>', toneHelp + 'The counts were clear, so the AI was not asked (it is only asked when they are not). ' +
+        'Judge the tone at review. Until then fit comes from ads alone.\n' + cl.reason);
     return '<div class="small cls">' + food + ' · ' + hcmc + ' · ' + ads + ' · ' + tone + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
   }
 
@@ -277,6 +280,16 @@
     return out + (c.missing ? '<div class="small">' + hint('<span class="muted">no ' + esc(c.missing) + ' yet</span>',
       c.missing.indexOf('growth') >= 0 ? 'Growth needs a second capture at least 7 days after the first: open the profile again next week and click PW creator.'
         : 'These parts have no data yet, so the score uses the others.') + '</div>' : '');
+  }
+
+  /** "Every morning at 07:00: last run today 07:04, 3 classified." or how to turn it on. */
+  function dailyLine(daily) {
+    if (!daily) return '';
+    var what = 'Every morning the sheet classifies new creators (counts first, the AI only when unclear) and recomputes every score. ' +
+      'It never opens Instagram or TikTok: new numbers come from PW creator.';
+    if (!daily.on) return hint('Morning run: off', what + '\nTurn it on in the sheet: Pin Wei KOL > Classify and score every morning.');
+    var last = daily.last ? 'last run ' + ago(daily.last.at) : 'not run yet';
+    return hint('Morning run: on, 0' + daily.hour + ':00 · ' + esc(last), what + (daily.last ? '\nLast run: ' + daily.last.message : ''));
   }
 
   /** One line under the list instead of a glossary: the details are in the hints. */
@@ -318,8 +331,12 @@
         d.pending_classification + ' new</button>' : ' · all classified') +
         ' <span class="muted small">AI: ' + esc(d.ai_providers.join(' → ')) + '</span>'
       : ' · <span class="small warnc">No AI key in Script Properties: classify by hand.</span>';
+    var due = d.creators.filter(function (c) { return c.recapture_due; }).length;
     out.push('<p class="qsum">' + list.length + (list.length === d.creators.length ? '' : ' of ' + d.creators.length) + ' creators' + ai +
       ' <span class="small" id="cmsg">' + state.classMsg + '</span></p>');
+    out.push('<p class="small muted">' + dailyLine(d.daily) + (due ? ' · ' + hint('<span class="warnc">' + due + ' to capture again</span>',
+      'Their last capture is a week old or more: open each profile and click PW creator. This part stays manual: reading Instagram or TikTok ' +
+      'automatically (scraping) is against their rules and can get the account blocked.') : '') + '</p>');
     if (!d.creators.length) {
       out.push('<p class="note">No creators yet. Paste a profile link above, or open a profile on Instagram or TikTok and click the ' +
         '<a href="install.html">PW creator bookmark</a>.</p>');
@@ -337,7 +354,9 @@
             classLine(c.classification) + '</td>' +
             '<td class="sc" data-th="Score">' + scoreCell(c, d.score_config) + '</td>' +
             '<td class="n" data-th="Followers">' + PW.members(c.followers) + '</td>' +
-            '<td data-th="Numbers saved">' + (c.snapshots ? c.snapshots + (c.snapshots === 1 ? ' day' : ' days') + ', last ' + esc(c.last_snapshot) : '<span class="muted">none yet</span>') + '</td>' +
+            '<td data-th="Numbers saved">' + (c.snapshots ? c.snapshots + (c.snapshots === 1 ? ' day' : ' days') + ', last ' + esc(c.last_snapshot) : '<span class="muted">none yet</span>') +
+            (c.recapture_due ? '<div class="small">' + hint('<span class="warnc">capture again</span>', 'The last capture is a week old or more. Open the profile and click ' +
+              'PW creator to save new numbers and captions: growth is measured between captures a week apart.') + '</div>' : '') + '</td>' +
             '<td class="stc" data-th="Status"><span class="st st-' + esc(c.status.toLowerCase()) + '">' + esc(c.status) + '</span></td>' +
             '<td class="nt" data-th="Note">' + esc(c.note) + '</td></tr>';
         }).join('') + '</tbody></table>');
@@ -410,15 +429,18 @@
     };
     say('Classifying…');
     $('cclass').disabled = true;
+    var counted = 0;
     var round = function () {
       return PW.api('classifyRun').then(function (r) {
         total += r.data.classified;
-        if (r.data.error) return say(total + ' classified. Stopped: ' + r.data.error, 'badc');
+        counted += r.data.by_counts || 0;
+        var done = total + ' classified' + (counted ? ' (' + counted + ' by the counts alone, no AI)' : '');
+        if (r.data.error) return say(done + '. ' + r.data.left + ' need the AI, which stopped: ' + r.data.error, 'badc');
         if (r.data.left && r.data.classified) {
-          say(total + ' classified, ' + r.data.left + ' left…');
+          say(done + ', ' + r.data.left + ' left…');
           return round();
         }
-        say(total + ' classified.', 'okc');
+        say(done + '.', 'okc');
       });
     };
     round().catch(function (err) { say('Stopped: ' + err.message, 'badc'); }).then(function () {

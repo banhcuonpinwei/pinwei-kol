@@ -62,7 +62,17 @@
     out.push('<div class="cgrid">' + field('ext', 'Website', p.ext || '', 'url', 'w2') + field('cat', 'Category', p.cat || '') +
       '<div><label class="check"><input type="checkbox" id="verified"' + (p.verified === '1' ? ' checked' : '') + '> Verified</label></div></div>');
     var n = Number(p.n || 0);
-    out.push('<label>Recent posts <span class="muted small">' + (n ? n + ' read from the page' : 'none on the page: scroll the profile a little, then click again') + '</span></label>');
+    var win = Number(p.win || 0);
+    var loaded = Number(p.loaded || 0);
+    var read = !n ? 'none on the page: scroll the profile a little, then click again'
+      : p.from ? n + ' posts from ' + p.from + ' to ' + p.to + (win >= n ? ' (the last ' + (p.wd || 30) + ' days)' : ' (fewer than 12 in the last ' + (p.wd || 30) + ' days, so the 12 newest)')
+        : n + ' posts read from the page';
+    out.push('<label>Recent posts <span class="muted small">' + esc(read) + '</span></label>');
+    // Every loaded post is still inside the window: older ones of that month may not be loaded yet.
+    if (p.from && win && win === loaded && win < 60) {
+      out.push('<p class="note warn small">All ' + loaded + ' loaded posts are from the last ' + (p.wd || 30) + ' days, so there may be more. ' +
+        'To read the whole month, scroll down the profile until older videos show, then click PW creator again.</p>');
+    }
     out.push('<div class="cgrid">' + field('avg_likes', 'Avg likes', p.avg_likes || '', 'number') + field('avg_comments', 'Avg comments', p.avg_comments || '', 'number') +
       field('avg_views', 'Avg views', p.avg_views || '', 'number') + '<div></div></div>');
     if (captions.length) {
@@ -104,6 +114,7 @@
       platform: platform, handle: handle, display_name: v('name'), followers: v('followers'), following: v('following'), posts_count: v('posts'),
       likes_total: v('likes_total'), bio: v('bio'), external_url: v('ext'), category: v('cat'), account_type: v('type'), verified: $('verified').checked,
       avg_likes: v('avg_likes'), avg_comments: v('avg_comments'), avg_views: v('avg_views'), posts_counted: p.n || '', captions: captions,
+      captions_window: p.from ? (p.n + ' posts, ' + p.from + ' to ' + p.to + ', ' + (p.win || 0) + ' in the last ' + (p.wd || 30) + ' days, ' + (p.loaded || 0) + ' loaded') : '',
       note: v('note'), saved_by: v('who'),
     }).then(function (r) {
       m.className = 'note ok';
