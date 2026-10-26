@@ -7,8 +7,7 @@
   var esc = PW.esc;
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 15;
-  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '',
-    glossaryOpen: window.innerWidth >= 760 }; // the glossary starts closed on a phone, where it is long
+  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
 
   function showError(err) {
     $('main').innerHTML = err && err.auth ? PW.noKeyHtml() : '<p class="note bad">' + esc(err && err.message || err) + '</p>';
@@ -31,7 +30,181 @@
     PW.api('bootstrap').then(function (r) {
       state.data = r.data;
       render();
+      loadAi();
     }, showError);
+  }
+
+  // ------------------------------------------------------------ AI providers panel (right column)
+
+  var ai = { status: null, edit: '', msg: '', busy: false };
+  var HEALTH = {
+    'ok': ['ok', 'Answering. Used in this order: the first that answers wins.'],
+    'not used yet': ['not used yet', 'Has a key but has not answered yet. Click Test all to try it.'],
+    'resting': ['resting', 'Hit its quota (HTTP 429). Skipped until it may be asked again; the next provider answers meanwhile.'],
+    'failing': ['failing', 'The last 3 calls failed (error, network or quota). Check its key or model, or move it down.'],
+    'no key': ['no key', 'No API key yet: it is skipped. Add one to use it.'],
+    'no account id': ['no account id', 'Cloudflare needs the account id as well as the token.'],
+    'not in the chain': ['not in the chain', 'Has a key but is not in the order list.'],
+  };
+
+  function loadAi() {
+    PW.api('aiStatus').then(function (r) { ai.status = r.data; renderAi(); }, function (err) {
+      $('aipanel').innerHTML = '<div class="card aicard"><p class="small badc">' + esc(err.message) + '</p></div>';
+    });
+  }
+
+  function healthPill(h) {
+    var x = HEALTH[h] || [h, ''];
+    return hint('<span class="pill h-' + esc(h.replace(/ /g, '-')) + '">' + esc(x[0]) + '</span>', x[1], 'r');
+  }
+
+  function quotaLine(p) {
+    if (p.neurons_limit) {
+      var used = p.neurons_today || 0;
+      var share = Math.min(1, used / p.neurons_limit);
+      return hint('<span class="qbar2"><span class="qfill' + (share > 0.8 ? ' high' : '') + '" style="width:' + Math.round(share * 100) + '%"></span></span>' +
+        num(Math.round(used)) + ' / ' + num(p.neurons_limit) + ' neurons today',
+        'Cloudflare\'s free allowance is ' + num(p.neurons_limit) + ' neurons a day; each answer reports its cost (about 2-3 neurons). Counted from today\'s answers.');
+    }
+    if (p.remaining) {
+      return hint('Left: ' + esc(p.remaining), 'What the provider reported with its last answer (' + esc(String(p.remaining_at).slice(0, 16).replace('T', ' ')) +
+        ' UTC). The key may be shared with other projects, which use the same quota.');
+    }
+    return hint('<span class="muted">quota not reported</span>', 'This provider does not say how much is left. Watch for "resting" and quota hits.');
+  }
+
+  function providerForm(p) {
+    var isNew = !p;
+    var known = (ai.status.providers || []).filter(function (x) { return !x.custom; });
+    return '<div class="aiform">' +
+      (isNew ? '<label for="ainame">Provider</label><select id="ainame">' + known.map(function (x) {
+        return '<option value="' + esc(x.name) + '">' + esc(x.name) + (x.key_hint ? ' (change key)' : '') + '</option>';
+      }).join('') + '<option value="other">Other (OpenAI-compatible)</option></select>' +
+        '<div id="aiother" hidden><label for="ainewname">Name</label><input type="text" id="ainewname" maxlength="20" placeholder="e.g. openrouter">' +
+        '<label for="aiurl">Address</label><input type="url" id="aiurl" placeholder="https://api.example.com/v1"></div>' : '') +
+      '<label for="aikey">API key' + (p && p.key_hint ? ' <span class="muted small">now ' + esc(p.key_hint) + ', leave empty to keep</span>' : '') + '</label>' +
+      '<input type="password" id="aikey" autocomplete="off" placeholder="Paste the key">' +
+      '<label for="aimodel">Model' + (p && p.default_model ? ' <span class="muted small">default ' + esc(p.default_model) + '</span>' : '') + '</label>' +
+      '<input type="text" id="aimodel" maxlength="120" value="' + esc(p ? p.model : '') + '">' +
+      (isNew || (p && p.needs_account) ? '<div id="aiacct"' + (isNew ? ' hidden' : '') + '><label for="aiaccount">Cloudflare account id</label>' +
+        '<input type="text" id="aiaccount" maxlength="32" placeholder="32 letters and digits"></div>' : '') +
+      '<div class="row"><button type="button" id="aisave">Save and test</button><button type="button" class="alt" id="aicancel">Cancel</button></div>' +
+      '<p class="small muted">The key is kept only in the script\'s Script Properties; this page never gets it back.</p></div>';
+  }
+
+  function renderAi() {
+    var s = ai.status;
+    var out = ['<div class="card aicard"><div class="aihead"><b>AI providers</b>' +
+      '<button type="button" class="alt small-btn" id="aitest"' + (ai.busy ? ' disabled' : '') + '>Test all</button></div>'];
+    out.push('<p class="small ' + (s.warning ? 'badc' : 'muted') + '">' + hint(s.working + ' of ' + s.providers.filter(function (p) { return p.position >= 0; }).length +
+      ' working', 'Production needs ' + s.min + ': one main and two backups. When one runs out of quota, the next one answers.') +
+      (s.warning ? '<br>' + esc(s.warning) : '') + '</p>');
+    out.push('<ol class="ailist">' + s.providers.map(function (p) {
+      var inChain = p.position >= 0;
+      var head = '<div class="airow"><span class="ainame">' + (inChain ? (p.position + 1) + '. ' : '') + esc(p.name) + '</span>' + healthPill(p.health) + '</div>';
+      if (!p.key_hint) {
+        return '<li class="aiitem off">' + head + '<div class="small aiact"><button type="button" class="link-btn aiedit" data-name="' + esc(p.name) + '">Add a key</button>' +
+          (inChain ? ' <button type="button" class="link-btn aimove" data-name="' + esc(p.name) + '" data-dir="up">Up</button>' +
+            ' <button type="button" class="link-btn aimove" data-name="' + esc(p.name) + '" data-dir="down">Down</button>' : '') + '</div>' +
+          (ai.edit === p.name ? providerForm(p) : '') + '</li>';
+      }
+      var t = p.today;
+      return '<li class="aiitem">' + head +
+        '<div class="small muted aimodel">' + esc(p.model) + (p.custom ? ' · added' : '') + '</div>' +
+        '<div class="small">' + hint('Today: ' + t.ok + ' ok' + (t.failed ? ', ' + t.failed + ' failed' : '') + (t.avg_ms ? ' · ' + (Math.round(t.avg_ms / 100) / 10) + ' s' : ''),
+          'Answers today (Vietnam time), including tests. "failed" counts errors, network problems, quota hits and unusable answers.' +
+          (p.last && p.last.status !== 'ok' ? '\nLast problem: ' + p.last.message : '')) +
+        (p.quota_hits_week ? ' · ' + hint('<span class="warnc">' + p.quota_hits_week + ' quota hit' + (p.quota_hits_week > 1 ? 's' : '') + ' this week</span>',
+          'Times it answered 429 (out of quota) in the last 7 days. Often? Add another key or provider.') : '') + '</div>' +
+        '<div class="small">' + quotaLine(p) + '</div>' +
+        '<div class="small aiact"><button type="button" class="link-btn aiedit" data-name="' + esc(p.name) + '">Change key or model</button>' +
+        (inChain ? ' <button type="button" class="link-btn aimove" data-name="' + esc(p.name) + '" data-dir="up">Up</button>' +
+          ' <button type="button" class="link-btn aimove" data-name="' + esc(p.name) + '" data-dir="down">Down</button>' : '') +
+        ' <button type="button" class="link-btn airemove" data-name="' + esc(p.name) + '">Remove</button></div>' +
+        (ai.edit === p.name ? providerForm(p) : '') + '</li>';
+    }).join('') + '</ol>');
+    out.push(ai.edit === 'new' ? providerForm(null) : '<button type="button" class="alt small-btn" id="aiadd">Add a provider or key</button>');
+    out.push('<p class="small" id="aimsg">' + ai.msg + '</p></div>');
+    $('aipanel').innerHTML = out.join('');
+    bindAi();
+  }
+
+  function aiSay(text, cls) {
+    ai.msg = '<span class="' + (cls || '') + '">' + esc(text) + '</span>';
+    if ($('aimsg')) $('aimsg').innerHTML = ai.msg;
+  }
+
+  function whoOrSay() {
+    var who = $('cwho') ? $('cwho').value.trim() : '';
+    if (!who) aiSay('Type your name in Saved by (above the list) first.', 'badc');
+    return who;
+  }
+
+  function aiCall(action, body, done) {
+    ai.busy = true;
+    PW.api(action, body).then(function (r) {
+      ai.busy = false;
+      if (done) done(r.data);
+      return PW.api('aiStatus').then(function (st) { ai.status = st.data; renderAi(); });
+    }).catch(function (err) {
+      ai.busy = false;
+      renderAi();
+      aiSay(err.message, 'badc');
+    });
+  }
+
+  function bindAi() {
+    $('aitest').addEventListener('click', function () {
+      this.disabled = true;
+      aiSay('Testing every provider…');
+      aiCall('aiTest', {}, function (d) { ai.msg = '<span class="small">' + d.lines.map(esc).join('<br>') + '</span>'; ai.status = d.status; });
+    });
+    if ($('aiadd')) $('aiadd').addEventListener('click', function () { ai.edit = 'new'; ai.msg = ''; renderAi(); });
+    Array.prototype.forEach.call(document.querySelectorAll('.aiedit'), function (b) {
+      b.addEventListener('click', function () { ai.edit = ai.edit === b.getAttribute('data-name') ? '' : b.getAttribute('data-name'); ai.msg = ''; renderAi(); });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.aimove'), function (b) {
+      b.addEventListener('click', function () {
+        aiCall('aiMoveProvider', { name: b.getAttribute('data-name'), dir: b.getAttribute('data-dir') }, function (d) { ai.msg = esc(d.message); });
+      });
+    });
+    Array.prototype.forEach.call(document.querySelectorAll('.airemove'), function (b) {
+      b.addEventListener('click', function () {
+        if (b.getAttribute('data-armed') !== '1') {
+          b.setAttribute('data-armed', '1');
+          b.textContent = 'Sure? Remove the key';
+          return;
+        }
+        var who = whoOrSay();
+        if (!who) return;
+        aiCall('aiRemoveProvider', { name: b.getAttribute('data-name'), saved_by: who }, function (d) { ai.msg = esc(d.message); });
+      });
+    });
+    if ($('ainame')) {
+      var sync = function () {
+        var other = $('ainame').value === 'other';
+        $('aiother').hidden = !other;
+        $('aiacct').hidden = $('ainame').value !== 'cloudflare';
+        var p = (ai.status.providers || []).filter(function (x) { return x.name === $('ainame').value; })[0];
+        $('aimodel').value = p ? p.model : '';
+      };
+      $('ainame').addEventListener('change', sync);
+      sync();
+    }
+    if ($('aicancel')) $('aicancel').addEventListener('click', function () { ai.edit = ''; renderAi(); });
+    if ($('aisave')) {
+      $('aisave').addEventListener('click', function () {
+        var who = whoOrSay();
+        if (!who) return;
+        var name = ai.edit === 'new' ? ($('ainame').value === 'other' ? $('ainewname').value : $('ainame').value) : ai.edit;
+        var body = { name: name, key: $('aikey').value, model: $('aimodel').value, saved_by: who };
+        if ($('aiurl') && $('ainame').value === 'other') body.url = $('aiurl').value;
+        if ($('aiaccount')) body.account = $('aiaccount').value;
+        this.disabled = true;
+        aiSay('Saving and testing…');
+        aiCall('aiSaveProvider', body, function (d) { ai.edit = ''; ai.msg = '<span class="' + (d.test && d.test.ok ? 'okc' : 'badc') + '">' + esc(d.message) + '</span>'; });
+      });
+    }
   }
 
   function visible() {
@@ -48,50 +221,70 @@
     return list;
   }
 
-  /** "Food yes · HCMC yes (all branches)" from the classification (by hand marked); the AI's reason on hover. */
+  /** A word or number with an explanation shown on hover (or on tap, through focus, on a phone). */
+  function hint(html, text, cls) {
+    return '<span class="hint' + (cls ? ' ' + cls : '') + '" tabindex="0" data-hint="' + esc(text) + '">' + html + '</span>';
+  }
+
+  var num = function (x) { return Number(x).toLocaleString('en-US'); };
+  var pct = function (x) { return Math.round(Number(x) * 1000) / 10 + '%'; };
+
+  /** Who gave an answer: "counted" when the counts decided it, else the AI or a person. */
+  function decidedBy(cl, label) {
+    if (cl.by === 'manual') return 'Set by hand.';
+    return new RegExp('counts: [^;]*' + label).test(cl.method) ? 'Decided by counting the captions.' : 'Judged by the AI (the counts were not clear).';
+  }
+
+  /** "Food yes 6/10 · HCMC yes · ads low · tone good", each with what it means and the counts behind it. */
   function classLine(cl) {
     if (!cl) return '';
-    var all = cl.based_in_hcmc === 'yes' ? ' (all branches)' : '';
-    return '<div class="small cls" title="' + esc(cl.reason) + '">Food ' + esc(cl.is_food_reviewer) + ' · HCMC ' + esc(cl.based_in_hcmc) + all +
-      ' · ads ' + esc(cl.ad_density) + ' · tone ' + esc(cl.tone_fit) + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
+    var n = cl.posts_seen || 0;
+    var counted = n ? ' ' + cl.food_posts + '/' + n : '';
+    var food = hint('Food ' + esc(cl.is_food_reviewer) + counted,
+      'Food creator: food or drinks in about a third of recent posts or more (mixed with travel or comedy is fine).\n' +
+      (n ? cl.food_posts + ' of ' + n + ' recent captions are about food' + (cl.food_tags ? ': ' + cl.food_tags : '') + '.\n' : '') +
+      'View-boosting tags (#xuhuong, #fyp, #viral …) are not counted.\n' + decidedBy(cl, 'food'));
+    var hcmc = hint('HCMC ' + esc(cl.based_in_hcmc),
+      'Lives in Ho Chi Minh City, so the creator is for all three branches.\nNeeds the city named (Sài Gòn, TP.HCM) or two different districts: ' +
+      'one district alone is not enough, names repeat in other cities.\n' + (cl.place_evidence ? 'Found: ' + cl.place_evidence + '.\n' : '') + decidedBy(cl, 'HCMC'));
+    var ads = hint('ads ' + esc(cl.ad_density),
+      'Share of posts that are paid or sponsored (hợp tác, tài trợ, #ad, discount codes, shop links).\nlow under 20%, medium 20-50%, high over 50%.\n' +
+      (n ? cl.ad_posts + ' of ' + n + ' recent captions look sponsored.\n' : '') + decidedBy(cl, 'ads'));
+    var tone = hint('tone ' + esc(cl.tone_fit),
+      'How the posts would sound for a family bánh cuốn shop: good = friendly, warm, honest or funny; ok = neutral; poor = crude, misleading ' +
+      'or luxury only.\n' + (cl.by === 'manual' ? 'Set by hand.' : 'The AI\'s judgment: ' + cl.reason));
+    return '<div class="small cls">' + food + ' · ' + hcmc + ' · ' + ads + ' · ' + tone + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
   }
 
-  /** What every word on the list means, with this sheet's own Config numbers. */
-  function glossary(cfg) {
-    var n = function (x) { return Number(x).toLocaleString('en-US'); };
-    var pct = function (x) { return Math.round(Number(x) * 1000) / 10 + '%'; };
+  /** The score, with its parts on hover; the tier and any exclusion explained. */
+  function scoreCell(c, cfg) {
     var w = cfg.weights || {};
-    var rows = [
-      ['Food', '<b>yes</b>: food or drinks (dishes, restaurants, cafés, street food, milk tea) are a regular part of the posts, about a third ' +
-        'or more, even mixed with travel, vlogs or comedy. <b>no</b>: food is rare. <b>unsure</b>: too little to tell.'],
-      ['HCMC', '<b>yes</b>: the bio or everyday posts place them in Ho Chi Minh City (trips elsewhere do not count against it); ' +
-        'such a creator is for <b>all three branches</b>. <b>no</b>: everyday life clearly in another city. <b>unsure</b>: no place named.'],
-      ['ads', 'Share of posts that are paid ads or sponsored (hợp tác, tài trợ, discount codes, shop links): <b>low</b> under 20%, ' +
-        '<b>medium</b> 20-50%, <b>high</b> over 50%. Fewer ads, more trusted reviews.'],
-      ['tone', 'How the posts would sound for a family bánh cuốn shop: <b>good</b> friendly, warm, honest or funny; <b>ok</b> neutral or ' +
-        'mostly other topics; <b>poor</b> crude, misleading or luxury-only.'],
-      ['Score', '0-100, the weighted mean of the parts below that have data (weights in Config: engagement ' + w.engagement + ', growth ' +
-        w.growth + ', size ' + w.size + ', fit ' + w.fit + '). No follower count, no score. Hover a classification to see the AI\'s reason.'],
-      ['engagement', 'Instagram: (avg likes + avg comments) / followers, full marks at ' + pct(cfg.er_target_ig) + '. TikTok: avg views / followers, ' +
-        'full marks at ' + pct(cfg.er_target_tiktok) + '. From the recent posts the bookmark read.'],
-      ['growth', 'Followers gained per week, between the newest saved numbers and ones at least 7 days older; full marks at ' +
-        pct(cfg.growth_target_weekly) + ' a week. "no growth yet" until a second capture a week later.'],
-      ['size', '<b>nano</b> ' + n(cfg.follower_min) + '-' + n(cfg.nano_max) + ' followers, <b>micro</b> up to ' + n(cfg.follower_max) +
-        ', <b>out</b> outside that range.'],
-      ['fit', 'From ads and tone (few ads and a good tone score highest); "unsure" about food or HCMC takes off 20%.'],
-      ['Red text', 'Excluded and why: verified account, outside the follower range, not a food creator or not based in HCMC. The score is kept to compare.'],
-      ['Numbers saved', 'Days with a capture of the numbers (one per day). Capture the same creator again a week later to measure growth.'],
-      ['Status', '<b>New</b> just added, <b>Classified</b> the AI or a person classified it; Approved, Rejected and Archived come with the review step.'],
-    ];
-    return '<details class="card glossary"' + (state.glossaryOpen ? ' open' : '') + '><summary>What the words on this list mean</summary><table class="list"><tbody>' +
-      rows.map(function (r) { return '<tr><th>' + esc(r[0]) + '</th><td>' + r[1] + '</td></tr>'; }).join('') + '</tbody></table></details>';
+    var tierHint = 'nano ' + num(cfg.follower_min) + '-' + num(cfg.nano_max) + ' followers, micro up to ' + num(cfg.follower_max) + ', out outside that range.';
+    if (c.score === null) return hint('<span class="muted small">needs numbers</span>', 'No follower count yet: open the profile and click PW creator.');
+    var p = c.parts || {};
+    var rate = p.engagement_rate === null || p.engagement_rate === undefined ? '' : ' (' + (c.platform === 'TikTok' ? 'views' : 'likes + comments') +
+      ' = ' + pct(p.engagement_rate) + ' of followers; full marks at ' + pct(c.platform === 'TikTok' ? cfg.er_target_tiktok : cfg.er_target_ig) + ')';
+    var part = function (label, v, extra) { return label + ': ' + (v === null || v === undefined ? 'no data yet' : v + '/100' + (extra || '')); };
+    var breakdown = 'Score 0-100, the weighted mean of the parts with data (weights: engagement ' + w.engagement + ', growth ' + w.growth +
+      ', size ' + w.size + ', fit ' + w.fit + ').\n' + part('engagement', p.engagement, rate) + '\n' +
+      part('growth', p.growth, p.growth_rate_weekly === null || p.growth_rate_weekly === undefined ? '' : ' (' + pct(p.growth_rate_weekly) + ' a week; full marks at ' +
+        pct(cfg.growth_target_weekly) + ')') + '\n' + part('size', p.size, ' (' + c.tier + ')') + '\n' + part('fit', p.fit, ' (from ads and tone)');
+    var out = hint('<b>' + c.score + '</b>', breakdown) + ' ' + hint('<span class="muted small">' + esc(c.tier) + '</span>', tierHint);
+    if (c.excluded) {
+      return out + '<div class="small">' + hint('<span class="badc">' + esc(c.exclude_reason) + '</span>',
+        'Left out of the shortlist for this reason. The score is kept so you can compare.') + '</div>';
+    }
+    return out + (c.missing ? '<div class="small">' + hint('<span class="muted">no ' + esc(c.missing) + ' yet</span>',
+      c.missing.indexOf('growth') >= 0 ? 'Growth needs a second capture at least 7 days after the first: open the profile again next week and click PW creator.'
+        : 'These parts have no data yet, so the score uses the others.') + '</div>' : '');
   }
 
-  function scoreCell(c) {
-    if (c.score === null) return '<span class="muted small">needs numbers</span>';
-    var parts = '<b>' + c.score + '</b> <span class="muted small">' + esc(c.tier) + '</span>';
-    if (c.excluded) return '<span class="excluded" title="' + esc(c.exclude_reason) + '">' + parts + '<div class="small badc">' + esc(c.exclude_reason) + '</div></span>';
-    return parts + (c.missing ? '<div class="small muted">no ' + esc(c.missing) + ' yet</div>' : '');
+  /** One line under the list instead of a glossary: the details are in the hints. */
+  function keyLine(cfg) {
+    var w = cfg.weights || {};
+    return '<p class="keyline small muted">Hover (or tap) any underlined word or number to see what it means and the counts behind it. ' +
+      'Score = engagement ' + w.engagement + ' + growth ' + w.growth + ' + size ' + w.size + ' + fit ' + w.fit + ' · nano ' + num(cfg.follower_min) + '-' +
+      num(cfg.nano_max) + ', micro to ' + num(cfg.follower_max) + ' followers · <span class="badc">red</span> = left out, with the reason.</p>';
   }
 
   function options(list, value, allLabel) {
@@ -133,13 +326,16 @@
     } else if (!shown.length) {
       out.push('<p class="note">No creator matches.</p>');
     } else {
-      out.push('<table class="list ctable"><thead><tr><th>Creator</th><th>Score</th><th class="n">Followers</th><th>Numbers saved</th><th>Status</th><th>Note</th></tr></thead><tbody>' +
+      out.push('<table class="list ctable"><thead><tr><th>Creator</th><th>' + hint('Score', 'Fit for a Pin Wei invitation, 0-100. Hover a score to see its parts.') + '</th>' +
+        '<th class="n">' + hint('Followers', 'From the latest capture of the profile.', 'r') + '</th>' +
+        '<th>' + hint('Numbers saved', 'Days with a capture of the numbers (one a day). Capture again a week later to measure growth.') + '</th>' +
+        '<th>' + hint('Status', 'New: just added. Classified: the counts and the AI (or a person) classified it. Approved, Rejected and Archived come with the review step.', 'r') + '</th><th>Note</th></tr></thead><tbody>' +
         shown.map(function (c) {
           return '<tr><td class="who" data-th="Creator"><a href="' + esc(c.profile_url) + '" target="_blank" rel="noopener">@' + esc(c.handle) + '</a>' +
             (c.display_name ? ' <span class="muted">' + esc(c.display_name) + '</span>' : '') + (c.verified ? ' <span class="tag">Verified</span>' : '') +
             '<div class="muted small">' + esc(c.platform) + ' · ' + esc(c.source) + ' · added ' + esc(ago(c.added_at)) + (c.added_by ? ' by ' + esc(c.added_by) : '') + '</div>' +
             classLine(c.classification) + '</td>' +
-            '<td class="sc" data-th="Score">' + scoreCell(c) + '</td>' +
+            '<td class="sc" data-th="Score">' + scoreCell(c, d.score_config) + '</td>' +
             '<td class="n" data-th="Followers">' + PW.members(c.followers) + '</td>' +
             '<td data-th="Numbers saved">' + (c.snapshots ? c.snapshots + (c.snapshots === 1 ? ' day' : ' days') + ', last ' + esc(c.last_snapshot) : '<span class="muted">none yet</span>') + '</td>' +
             '<td class="stc" data-th="Status"><span class="st st-' + esc(c.status.toLowerCase()) + '">' + esc(c.status) + '</span></td>' +
@@ -151,7 +347,7 @@
           '<button type="button" class="alt" id="cnext"' + (state.page >= pages - 1 ? ' disabled' : '') + '>Next</button></div>');
       }
     }
-    if (d.creators.length) out.push(glossary(d.score_config));
+    if (d.creators.length) out.push(keyLine(d.score_config));
     $('main').innerHTML = out.join('');
     bind();
   }
@@ -159,9 +355,6 @@
   function bind() {
     PW.remember('pwkol_by', $('cwho'));
     document.querySelector('.addcreator').addEventListener('toggle', function () { state.addOpen = this.open; });
-    if (document.querySelector('.glossary')) {
-      document.querySelector('.glossary').addEventListener('toggle', function () { state.glossaryOpen = this.open; });
-    }
     $('csearch').addEventListener('input', function () {
       state.search = this.value;
       state.page = 0;
@@ -230,7 +423,7 @@
     };
     round().catch(function (err) { say('Stopped: ' + err.message, 'badc'); }).then(function () {
       state.classifying = false;
-      return PW.api('bootstrap').then(function (all) { state.data = all.data; render(); });
+      return PW.api('bootstrap').then(function (all) { state.data = all.data; render(); loadAi(); });
     }).catch(showError);
   }
 
