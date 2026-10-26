@@ -7,7 +7,7 @@
   var esc = PW.esc;
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 15;
-  var state = { data: null, search: '', platform: 'All', status: 'All', page: 0, addOpen: false };
+  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
 
   function showError(err) {
     $('main').innerHTML = err && err.auth ? PW.noKeyHtml() : '<p class="note bad">' + esc(err && err.message || err) + '</p>';
@@ -35,10 +35,31 @@
 
   function visible() {
     var s = state.search.trim().toLowerCase().replace(/^@/, '');
-    return state.data.creators.filter(function (c) {
+    var list = state.data.creators.filter(function (c) {
       return (state.platform === 'All' || c.platform === state.platform) && (state.status === 'All' || c.status === state.status) &&
         (!s || c.handle.indexOf(s) >= 0 || c.display_name.toLowerCase().indexOf(s) >= 0 || c.note.toLowerCase().indexOf(s) >= 0);
     });
+    if (state.sort === 'score') {
+      // Best first; excluded creators and those without a score at the end.
+      var rank = function (c) { return c.score === null ? -2 : c.excluded ? -1 + c.score / 1000 : c.score; };
+      list = list.slice().sort(function (a, b) { return rank(b) - rank(a); });
+    }
+    return list;
+  }
+
+  /** "Food yes · HCMC yes · near BT" from the classification (by hand marked). */
+  function classLine(cl) {
+    if (!cl) return '';
+    var near = cl.nearest_branch_guess && cl.nearest_branch_guess !== 'unknown' ? ' · near ' + cl.nearest_branch_guess : '';
+    return '<div class="small cls" title="' + esc(cl.reason) + '">Food ' + esc(cl.is_food_reviewer) + ' · HCMC ' + esc(cl.based_in_hcmc) + near +
+      ' · ads ' + esc(cl.ad_density) + ' · tone ' + esc(cl.tone_fit) + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
+  }
+
+  function scoreCell(c) {
+    if (c.score === null) return '<span class="muted small">needs numbers</span>';
+    var parts = '<b>' + c.score + '</b> <span class="muted small">' + esc(c.tier) + '</span>';
+    if (c.excluded) return '<span class="excluded" title="' + esc(c.exclude_reason) + '">' + parts + '<div class="small badc">' + esc(c.exclude_reason) + '</div></span>';
+    return parts + (c.missing ? '<div class="small muted">no ' + esc(c.missing) + ' yet</div>' : '');
   }
 
   function options(list, value, allLabel) {
@@ -57,6 +78,8 @@
     out.push('<div class="qbar cbar"><input type="search" id="csearch" placeholder="Find a creator" value="' + esc(state.search) + '">' +
       '<select id="cplatform" aria-label="Platform">' + options(d.platforms, state.platform, 'All platforms') + '</select>' +
       '<select id="cstatus" aria-label="Status">' + options(d.statuses, state.status, 'All statuses') + '</select>' +
+      '<select id="csort" aria-label="Order"><option value="newest"' + (state.sort === 'newest' ? ' selected' : '') + '>Newest first</option>' +
+      '<option value="score"' + (state.sort === 'score' ? ' selected' : '') + '>Best score first</option></select>' +
       '<label for="cwho">Saved by</label><input type="text" id="cwho" maxlength="60" placeholder="Your name" list="people">' +
       '<datalist id="people">' + d.people.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist></div>');
     out.push('<details class="card addcreator"' + (d.creators.length && !state.addOpen ? '' : ' open') + '><summary>Add a creator</summary><div class="agrid">' +
@@ -65,18 +88,26 @@
       '<div><label for="anote">Note (optional)</label><input type="text" id="anote" maxlength="500"></div>' +
       '</div><div class="row"><button type="button" id="aadd">Add creator</button><span class="small" id="amsg"></span></div>' +
       '<p class="muted small">For exact numbers and the bio, open the profile and click the PW creator bookmark instead.</p></details>');
-    out.push('<p class="qsum">' + list.length + (list.length === d.creators.length ? '' : ' of ' + d.creators.length) + ' creators</p>');
+    var ai = d.ai_providers.length
+      ? (d.pending_classification ? ' · <button type="button" class="alt small-btn" id="cclass"' + (state.classifying ? ' disabled' : '') + '>Classify ' +
+        d.pending_classification + ' new</button>' : ' · all classified') +
+        ' <span class="muted small">AI: ' + esc(d.ai_providers.join(' → ')) + '</span>'
+      : ' · <span class="small warnc">No AI key in Script Properties: classify by hand.</span>';
+    out.push('<p class="qsum">' + list.length + (list.length === d.creators.length ? '' : ' of ' + d.creators.length) + ' creators' + ai +
+      ' <span class="small" id="cmsg">' + state.classMsg + '</span></p>');
     if (!d.creators.length) {
       out.push('<p class="note">No creators yet. Paste a profile link above, or open a profile on Instagram or TikTok and click the ' +
         '<a href="install.html">PW creator bookmark</a>.</p>');
     } else if (!shown.length) {
       out.push('<p class="note">No creator matches.</p>');
     } else {
-      out.push('<table class="list ctable"><thead><tr><th>Creator</th><th class="n">Followers</th><th>Numbers saved</th><th>Status</th><th>Note</th></tr></thead><tbody>' +
+      out.push('<table class="list ctable"><thead><tr><th>Creator</th><th>Score</th><th class="n">Followers</th><th>Numbers saved</th><th>Status</th><th>Note</th></tr></thead><tbody>' +
         shown.map(function (c) {
           return '<tr><td class="who" data-th="Creator"><a href="' + esc(c.profile_url) + '" target="_blank" rel="noopener">@' + esc(c.handle) + '</a>' +
             (c.display_name ? ' <span class="muted">' + esc(c.display_name) + '</span>' : '') + (c.verified ? ' <span class="tag">Verified</span>' : '') +
-            '<div class="muted small">' + esc(c.platform) + ' · ' + esc(c.source) + ' · added ' + esc(ago(c.added_at)) + (c.added_by ? ' by ' + esc(c.added_by) : '') + '</div></td>' +
+            '<div class="muted small">' + esc(c.platform) + ' · ' + esc(c.source) + ' · added ' + esc(ago(c.added_at)) + (c.added_by ? ' by ' + esc(c.added_by) : '') + '</div>' +
+            classLine(c.classification) + '</td>' +
+            '<td class="sc" data-th="Score">' + scoreCell(c) + '</td>' +
             '<td class="n" data-th="Followers">' + PW.members(c.followers) + '</td>' +
             '<td data-th="Numbers saved">' + (c.snapshots ? c.snapshots + (c.snapshots === 1 ? ' day' : ' days') + ', last ' + esc(c.last_snapshot) : '<span class="muted">none yet</span>') + '</td>' +
             '<td class="stc" data-th="Status"><span class="st st-' + esc(c.status.toLowerCase()) + '">' + esc(c.status) + '</span></td>' +
@@ -105,6 +136,8 @@
     });
     $('cplatform').addEventListener('change', function () { state.platform = this.value; state.page = 0; render(); });
     $('cstatus').addEventListener('change', function () { state.status = this.value; state.page = 0; render(); });
+    $('csort').addEventListener('change', function () { state.sort = this.value; state.page = 0; render(); });
+    if ($('cclass')) $('cclass').addEventListener('click', classifyAll);
     if ($('cprev')) $('cprev').addEventListener('click', function () { state.page--; render(); });
     if ($('cnext')) $('cnext').addEventListener('click', function () { state.page++; render(); });
     $('aadd').addEventListener('click', function () {
@@ -133,6 +166,36 @@
         m.textContent = err.message;
       });
     });
+  }
+
+  /**
+   * Classifies the pending creators a few at a time (each call waits for the AI), until none are left, the
+   * whole provider chain fails, or a round makes no progress. Then the list reloads with the new scores.
+   */
+  function classifyAll() {
+    var total = 0;
+    state.classifying = true;
+    var say = function (text, cls) {
+      state.classMsg = '<span class="' + (cls || '') + '">' + esc(text) + '</span>';
+      if ($('cmsg')) $('cmsg').innerHTML = state.classMsg;
+    };
+    say('Classifying…');
+    $('cclass').disabled = true;
+    var round = function () {
+      return PW.api('classifyRun').then(function (r) {
+        total += r.data.classified;
+        if (r.data.error) return say(total + ' classified. Stopped: ' + r.data.error, 'badc');
+        if (r.data.left && r.data.classified) {
+          say(total + ' classified, ' + r.data.left + ' left…');
+          return round();
+        }
+        say(total + ' classified.', 'okc');
+      });
+    };
+    round().catch(function (err) { say('Stopped: ' + err.message, 'badc'); }).then(function () {
+      state.classifying = false;
+      return PW.api('bootstrap').then(function (all) { state.data = all.data; render(); });
+    }).catch(showError);
   }
 
   load();
