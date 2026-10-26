@@ -47,11 +47,11 @@
     return list;
   }
 
-  /** "Food yes · HCMC yes · near BT" from the classification (by hand marked). */
+  /** "Food yes · HCMC yes (all branches)" from the classification (by hand marked). */
   function classLine(cl) {
     if (!cl) return '';
-    var near = cl.nearest_branch_guess && cl.nearest_branch_guess !== 'unknown' ? ' · near ' + cl.nearest_branch_guess : '';
-    return '<div class="small cls" title="' + esc(cl.reason) + '">Food ' + esc(cl.is_food_reviewer) + ' · HCMC ' + esc(cl.based_in_hcmc) + near +
+    var all = cl.based_in_hcmc === 'yes' ? ' (all branches)' : '';
+    return '<div class="small cls" title="' + esc(cl.reason) + '">Food ' + esc(cl.is_food_reviewer) + ' · HCMC ' + esc(cl.based_in_hcmc) + all +
       ' · ads ' + esc(cl.ad_density) + ' · tone ' + esc(cl.tone_fit) + (cl.by === 'manual' ? ' · by hand' : '') + '</div>';
   }
 
