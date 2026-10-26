@@ -68,10 +68,10 @@
       : p.from ? n + ' posts from ' + p.from + ' to ' + p.to + (win >= n ? ' (the last ' + (p.wd || 30) + ' days)' : ' (fewer than 12 in the last ' + (p.wd || 30) + ' days, so the 12 newest)')
         : n + ' posts read from the page';
     out.push('<label>Recent posts <span class="muted small">' + esc(read) + '</span></label>');
-    // Every loaded post is still inside the window: older ones of that month may not be loaded yet.
-    if (p.from && win && win === loaded && win < 60) {
-      out.push('<p class="note warn small">All ' + loaded + ' loaded posts are from the last ' + (p.wd || 30) + ' days, so there may be more. ' +
-        'To read the whole month, scroll down the profile until older videos show, then click PW creator again.</p>');
+    // Every loaded post is still inside the window although the bookmark scrolled: it was stopped, or the page loaded no more.
+    if (p.from && win && win === loaded && win < 60 && Number(p.posts || 0) > loaded + 3) {
+      out.push('<p class="note warn small">All ' + loaded + ' loaded posts are from the last ' + (p.wd || 30) + ' days, so there may be more ' +
+        '(the scrolling was stopped, or the page loaded no more). To read the whole month, click PW creator on the profile again.</p>');
     }
     out.push('<div class="cgrid">' + field('avg_likes', 'Avg likes', p.avg_likes || '', 'number') + field('avg_comments', 'Avg comments', p.avg_comments || '', 'number') +
       field('avg_views', 'Avg views', p.avg_views || '', 'number') + '<div></div></div>');
