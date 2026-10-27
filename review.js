@@ -72,7 +72,8 @@
       '<label class="check"><input type="checkbox" id="rvai"' + (aiOn ? ' checked' : ' disabled') + '> ' +
       K.hint('Add a sentence about their channel', aiOn ? 'The AI writes one sentence from their bio and captions (what you liked in their videos). You can edit it.'
         : 'No AI key works now: the invitation is the Config template alone.') + '</label>' +
-      '<button type="button" id="rvapprove">Approve and write the invitation</button></div>';
+      '<button type="button" id="rvapprove">Approve and write the invitation</button>' +
+      '<p class="small muted">The text comes from the Config sheet: invite_template_barter / invite_template_paid, and branch_TD, BT, LM for the branch.</p></div>';
     var reject = '<div class="rvbox"><h4>Reject</h4><div class="rvsel"><label>Reason<select id="rvreason"><option value="">Pick a reason</option>' +
       options(cfg.reject_reasons) + '</select></label><label id="rvotherl" hidden>Other reason<input type="text" id="rvother" maxlength="200"></label></div>' +
       '<button type="button" class="alt" id="rvreject">Reject</button></div>';
