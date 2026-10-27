@@ -1,13 +1,20 @@
 /*
  * The KOL site's main page: the Creators list (search, filters, 15 per page) and "Add a creator" by
- * profile link. Later steps add the Review, Outreach and Dashboard tabs here.
+ * profile link, and the tabs: #creators, #review and #outreach (those two are drawn by review.js through
+ * window.KOL). The AI providers and TikTok data panel shows on the Creators tab.
  */
 (function () {
   'use strict';
   var esc = PW.esc;
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 15;
-  var state = { data: null, search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
+  var state = { data: null, tab: 'creators', search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
+  var TABS = ['creators', 'review', 'outreach'];
+
+  function tabFromHash() {
+    var t = String(location.hash || '').replace(/^#/, '').split('&')[0];
+    return TABS.indexOf(t) >= 0 ? t : 'creators';
+  }
 
   function showError(err) {
     $('main').innerHTML = err && err.auth ? PW.noKeyHtml() : '<p class="note bad">' + esc(err && err.message || err) + '</p>';
@@ -27,6 +34,11 @@
       return;
     }
     if (!PW.token()) return showError({ auth: true });
+    state.tab = tabFromHash();
+    window.addEventListener('hashchange', function () {
+      state.tab = tabFromHash();
+      if (state.data) render();
+    });
     PW.api('bootstrap').then(function (r) {
       state.data = r.data;
       render();
@@ -355,7 +367,52 @@
     }).join('');
   }
 
+  /** Classified creators not left out, best score first: what the Review tab shows. */
+  function reviewQueue() {
+    var rank = function (c) { return c.score === null ? -1 : c.score; };
+    return state.data.creators.filter(function (c) { return c.status === 'Classified' && !c.excluded; })
+      .sort(function (a, b) { return rank(b) - rank(a); });
+  }
+
+  function openOutreach() {
+    var open = state.data.outreach_config.open;
+    return state.data.outreach.filter(function (o) { return open.indexOf(o.status) >= 0; });
+  }
+
+  function renderTabs() {
+    var n = { review: reviewQueue().length, outreach: openOutreach().length };
+    var label = { creators: 'Creators', review: 'Review', outreach: 'Outreach' };
+    $('tabs').innerHTML = TABS.map(function (t) {
+      return '<a href="#' + t + '"' + (state.tab === t ? ' class="on" aria-current="page"' : '') + '>' + label[t] + (n[t] ? ' <span class="cnt">' + n[t] + '</span>' : '') + '</a>';
+    }).join('') + '<a href="install.html">Bookmark</a>';
+  }
+
   function render() {
+    renderTabs();
+    var solo = state.tab !== 'creators';
+    document.querySelector('.kgrid').classList.toggle('solo', solo);
+    $('aipanel').hidden = solo;
+    if (state.tab === 'review') return window.KOL.renderReview();
+    if (state.tab === 'outreach') return window.KOL.renderOutreach();
+    renderCreators();
+  }
+
+  /** Reloads everything from the sheet, then draws the current tab; then(done) after. */
+  function reload(done) {
+    return PW.api('bootstrap').then(function (all) {
+      state.data = all.data;
+      render();
+      if (done) done();
+    });
+  }
+
+  /** The "Saved by" box every tab has (the name is kept in this browser). */
+  function whoBox() {
+    return '<label for="cwho">Saved by</label><input type="text" id="cwho" maxlength="60" placeholder="Your name" list="people">' +
+      '<datalist id="people">' + state.data.people.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist>';
+  }
+
+  function renderCreators() {
     var d = state.data;
     var list = visible();
     var pages = Math.max(1, Math.ceil(list.length / PAGE));
@@ -367,8 +424,7 @@
       '<select id="cstatus" aria-label="Status">' + options(d.statuses, state.status, 'All statuses') + '</select>' +
       '<select id="csort" aria-label="Order"><option value="newest"' + (state.sort === 'newest' ? ' selected' : '') + '>Newest first</option>' +
       '<option value="score"' + (state.sort === 'score' ? ' selected' : '') + '>Best score first</option></select>' +
-      '<label for="cwho">Saved by</label><input type="text" id="cwho" maxlength="60" placeholder="Your name" list="people">' +
-      '<datalist id="people">' + d.people.map(function (n) { return '<option value="' + esc(n) + '">'; }).join('') + '</datalist></div>');
+      whoBox() + '</div>');
     out.push('<details class="card addcreator"' + (d.creators.length && !state.addOpen ? '' : ' open') + '><summary>Add a creator</summary><div class="agrid">' +
       '<div><label for="aurl">Instagram or TikTok profile link</label><input type="url" id="aurl" placeholder="https://www.instagram.com/… or https://www.tiktok.com/@…"></div>' +
       '<div><label for="afollowers">Followers (optional)</label><input type="text" id="afollowers" placeholder="e.g. 12,3K"></div>' +
@@ -395,7 +451,8 @@
       out.push('<table class="list ctable"><thead><tr><th>Creator</th><th>' + hint('Score', 'Fit for a Pin Wei invitation, 0-100. Hover a score to see its parts.') + '</th>' +
         '<th class="n">' + hint('Followers', 'From the latest capture of the profile.', 'r') + '</th>' +
         '<th>' + hint('Numbers saved', 'Days with a capture of the numbers (one a day). Capture again a week later to measure growth.') + '</th>' +
-        '<th>' + hint('Status', 'New: just added. Classified: the counts and the AI (or a person) classified it. Approved, Rejected and Archived come with the review step.', 'r') + '</th><th>Note</th></tr></thead><tbody>' +
+        '<th>' + hint('Status', 'New: just added. Classified: the counts and the AI (or a person) classified it; it waits in Review. ' +
+          'Approved: invited (see Outreach). Rejected: left out at review, with the reason.', 'r') + '</th><th>Note</th></tr></thead><tbody>' +
         shown.map(function (c) {
           return '<tr><td class="who" data-th="Creator"><a href="' + esc(c.profile_url) + '" target="_blank" rel="noopener">@' + esc(c.handle) + '</a>' +
             (c.display_name ? ' <span class="muted">' + esc(c.display_name) + '</span>' : '') + (c.verified ? ' <span class="tag">Verified</span>' : '') +
@@ -406,7 +463,9 @@
             '<td data-th="Numbers saved">' + (c.snapshots ? c.snapshots + (c.snapshots === 1 ? ' day' : ' days') + ', last ' + esc(c.last_snapshot) : '<span class="muted">none yet</span>') +
             (c.recapture_due ? '<div class="small">' + hint('<span class="warnc">capture again</span>', 'The last capture is a week old or more. Open the profile and click ' +
               'PW creator to save new numbers and captions: growth is measured between captures a week apart.') + '</div>' : '') + '</td>' +
-            '<td class="stc" data-th="Status"><span class="st st-' + esc(c.status.toLowerCase()) + '">' + esc(c.status) + '</span></td>' +
+            '<td class="stc" data-th="Status"><span class="st st-' + esc(c.status.toLowerCase()) + '">' + esc(c.status) + '</span>' +
+            (c.status === 'Rejected' ? '<div class="small muted">' + esc(c.reject_reason) + '</div><button type="button" class="link-btn small reopen" data-id="' +
+              esc(c.creator_id) + '">Back to review</button>' : '') + '</td>' +
             '<td class="nt" data-th="Note">' + esc(c.note) + '</td></tr>';
         }).join('') + '</tbody></table>');
       if (pages > 1) {
@@ -435,6 +494,16 @@
     $('cstatus').addEventListener('change', function () { state.status = this.value; state.page = 0; render(); });
     $('csort').addEventListener('change', function () { state.sort = this.value; state.page = 0; render(); });
     if ($('cclass')) $('cclass').addEventListener('click', classifyAll);
+    Array.prototype.forEach.call(document.querySelectorAll('.reopen'), function (b) {
+      b.addEventListener('click', function () {
+        var who = $('cwho').value.trim();
+        if (!who) { $('cmsg').innerHTML = '<span class="badc">Type your name in Saved by first.</span>'; return; }
+        b.disabled = true;
+        PW.api('reviewReopen', { creator_id: b.getAttribute('data-id'), saved_by: who }).then(function (r) {
+          return reload(function () { $('cmsg').innerHTML = '<span class="okc">' + esc(r.data.message) + '</span>'; });
+        }).catch(function (err) { b.disabled = false; $('cmsg').innerHTML = '<span class="badc">' + esc(err.message) + '</span>'; });
+      });
+    });
     if ($('cprev')) $('cprev').addEventListener('click', function () { state.page--; render(); });
     if ($('cnext')) $('cnext').addEventListener('click', function () { state.page++; render(); });
     $('aadd').addEventListener('click', function () {
@@ -498,5 +567,7 @@
     }).catch(showError);
   }
 
+  window.KOL = { state: state, hint: hint, classLine: classLine, scoreCell: scoreCell, ago: ago, num: num, reviewQueue: reviewQueue,
+    openOutreach: openOutreach, reload: reload, whoBox: whoBox, showError: showError };
   load();
 })();
