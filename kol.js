@@ -142,7 +142,10 @@
     out.push('<div class="small">' + hint('Profiles: ' + (last ? 'runner ' + esc(ago(last.at)) + ', ' + last.read + ' read' + (last.failed ? ', ' + last.failed + ' failed' : '') : 'runner not run yet') +
       ' · ' + rn.waiting + ' waiting', 'The PW runner (kol/runner, on an office computer) opens each waiting TikTok profile as a guest, scrolls to the last ' +
       '30 days and saves what PW creator would read. Free; up to ' + rn.per_run + ' profiles a run. Waiting: new creators, and those read more than ' +
-      'apify_refresh_days ago.' + (last && last.stopped ? '\nLast run stopped: ' + last.stopped : '') + (last && last.message ? '\n' + last.message : '')) + '</div>');
+      'apify_refresh_days ago.' + (last && last.stopped ? '\nLast run stopped: ' + last.stopped : '') + (last && last.message ? '\n' + last.message : '')) +
+      ' · ' + hint('puzzle alerts: ' + (rn.alerts ? 'Telegram' : 'this computer only'), 'When TikTok shows a puzzle the runner shows a notification on its ' +
+      'computer' + (rn.alerts ? ' and writes to Telegram' : '; add TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID to Script Properties (the Ops Monitor bot\'s ' +
+      'two values work) to get it on Telegram too') + ', then waits 30 minutes for someone to drag the slider.') + '</div>');
     if (!a.on) {
       out.push('<div class="small muted">' + hint('Search: not set up', 'Add APIFY_TOKEN (Apify > Settings > API & Integrations) to Script Properties. ' +
         'Apify then searches the food hashtags every week on its own servers and adds the creators it finds; no Pin Wei account is used.') + '</div></div>');
