@@ -46,7 +46,6 @@
     if (d.error) return '<p class="badc small">' + esc(d.error) + '</p>';
     var cfg = K.state.data.outreach_config;
     var cl = c.classification || {};
-    var aiOn = K.state.data.ai_providers.length > 0;
     var snaps = d.snapshots.map(function (s) {
       return esc(s.date) + ': ' + PW.members(s.followers) + ' followers' + (s.avg_views !== null ? ', ' + PW.members(s.avg_views) + ' avg views' : '') +
         (s.avg_likes !== null ? ', ' + PW.members(s.avg_likes) + ' avg likes' : '');
@@ -69,9 +68,6 @@
     var approve = '<div class="rvbox"><h4>Approve</h4><div class="rvsel">' +
       '<label>Invitation<select id="rvtype">' + options(cfg.invite_types, 'Barter', function (t) { return t === 'Barter' ? 'Barter (free meal)' : 'Paid'; }) + '</select></label>' +
       '<label>Branch<select id="rvbranch">' + options(cfg.branches, 'Any', function (b) { return b.code === 'Any' ? 'They choose' : b.code; }) + '</select></label></div>' +
-      '<label class="check"><input type="checkbox" id="rvai"' + (aiOn ? ' checked' : ' disabled') + '> ' +
-      K.hint('Add a sentence about their channel', aiOn ? 'The AI writes one sentence from their bio and captions (what you liked in their videos). You can edit it.'
-        : 'No AI key works now: the invitation is the Config template alone.') + '</label>' +
       '<button type="button" id="rvapprove">Approve and write the invitation</button>' +
       '<p class="small muted">The text comes from the Config sheet: invite_template_barter / invite_template_paid, and branch_TD, BT, LM for the branch.</p></div>';
     var reject = '<div class="rvbox"><h4>Reject</h4><div class="rvsel"><label>Reason<select id="rvreason"><option value="">Pick a reason</option>' +
@@ -155,12 +151,11 @@
     var id = rv.open;
     $('rvreason').addEventListener('change', function () { $('rvotherl').hidden = this.value !== 'Other'; });
     $('rvapprove').addEventListener('click', function () {
-      say('rvmsg', $('rvai').checked ? 'Writing the invitation (the AI may take a few seconds)…' : 'Writing the invitation…');
-      act('reviewApprove', { creator_id: id, invite_type: $('rvtype').value, branch: $('rvbranch').value, personalize: $('rvai').checked }, this, function (d) {
+      act('reviewApprove', { creator_id: id, invite_type: $('rvtype').value, branch: $('rvbranch').value }, this, function (d) {
         rv.open = '';
         delete rv.details[id];
         out.oopen = d.outreach_id;
-        out.omsg = '<span class="' + (d.personalized ? 'okc' : 'warnc') + '">' + esc(d.message) + '</span>';
+        out.omsg = '<span class="okc">' + esc(d.message) + '</span>';
         return K.reload(function () { location.hash = 'outreach'; });
       });
     });
@@ -211,6 +206,10 @@
     return esc(parts.join(' · '));
   }
 
+  function numVal(n) {
+    return n === null || n === undefined ? '' : String(n);
+  }
+
   function outreachDetail(o) {
     var cfg = K.state.data.outreach_config;
     var sending = o.status === 'To send';
@@ -225,7 +224,11 @@
       '<label>Visit date<input type="date" id="orsched" value="' + esc(o.scheduled_for) + '"></label>' +
       '<label>Visited on<input type="date" id="orvisit" value="' + esc(o.visited_at) + '"></label>' +
       '<label class="w2">Review link<input type="url" id="orurl" placeholder="https://…" value="' + esc(o.review_url) + '"></label>' +
-      '<label class="w2">Review numbers<input type="text" id="orstats" maxlength="200" placeholder="e.g. 12K views, 900 likes, 40 comments" value="' + esc(o.review_stats) + '"></label>' +
+      '<label>Views<input type="text" id="orviews" inputmode="numeric" placeholder="e.g. 12,3K" value="' + numVal(o.review_views) + '"></label>' +
+      '<label>Likes<input type="text" id="orlikes" inputmode="numeric" value="' + numVal(o.review_likes) + '"></label>' +
+      '<label>Comments<input type="text" id="orcomments" inputmode="numeric" value="' + numVal(o.review_comments) + '"></label>' +
+      '<label>' + K.hint('Cost (VND)', 'What this invitation cost Pin Wei: the meal (menu price) for Barter, the fee for Paid. The dashboard divides it by the views.') +
+      '<input type="text" id="orcost" inputmode="numeric" placeholder="e.g. 250000" value="' + numVal(o.cost_vnd) + '"></label>' +
       '<label class="w2">Note<input type="text" id="ornote" maxlength="500" value="' + esc(o.note) + '"></label></div>' +
       '<div class="row">' + (sending ? '<button type="button" id="orsent">Mark as sent</button>' : '') +
       '<button type="button" class="' + (sending ? 'alt' : '') + '" id="orsave">Save</button></div>' +
@@ -260,7 +263,8 @@
             '<td data-th="Invitation">' + esc(o.invite_type) + ' · ' + esc(o.branch === 'Any' ? 'they choose' : o.branch) + '<div class="muted small">' + dates(o) + '</div></td>' +
             '<td class="stc" data-th="Status"><span class="st st-' + esc(o.status.toLowerCase().replace(/ /g, '-')) + '">' + esc(o.status) + '</span></td>' +
             '<td data-th="Review">' + (o.review_url ? '<a href="' + esc(o.review_url) + '" target="_blank" rel="noopener">Open</a>' : '<span class="muted">-</span>') +
-            (o.review_stats ? '<div class="small muted">' + esc(o.review_stats) + '</div>' : '') + '</td>' +
+            (o.review_views !== null ? '<div class="small muted">' + PW.members(o.review_views) + ' views' + (o.review_likes !== null ? ', ' + PW.members(o.review_likes) + ' likes' : '') + '</div>' :
+              o.review_stats ? '<div class="small muted">' + esc(o.review_stats) + '</div>' : '') + '</td>' +
             '<td class="act"><button type="button" class="alt small-btn oropen" data-id="' + esc(o.outreach_id) + '">' + (open ? 'Close' : 'Open') + '</button></td></tr>' +
             (open ? '<tr class="rvdetail"><td colspan="5">' + outreachDetail(o) + '</td></tr>' : '');
         }).join('') + '</tbody></table>');
@@ -291,7 +295,8 @@
       var name = who();
       if (!name) return say('ormsg', 'Type your name in Saved by (above the list) first.', 'badc');
       var body = { outreach_id: id, saved_by: name, status: $('orstatus').value, scheduled_for: $('orsched').value, visited_at: $('orvisit').value,
-        review_url: $('orurl').value, review_stats: $('orstats').value, note: $('ornote').value };
+        review_url: $('orurl').value, review_views: $('orviews').value, review_likes: $('orlikes').value, review_comments: $('orcomments').value,
+        cost_vnd: $('orcost').value, note: $('ornote').value };
       if (o.status === 'To send') body.invite_text = $('ortext').value;
       button.disabled = true;
       say('ormsg', 'Saving…');
