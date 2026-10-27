@@ -1,4 +1,3 @@
-# Pin Wei KOL (site)
+# Moved
 
-The browser side of Pin Wei KOL: creator list, PW creator form, bookmark install page.
-Generated from a private repo; do not edit here. Data and the key live in Google Apps Script, not in this repo.
+This site moved to https://banhcuonpinwei.github.io/pinwei-marketing/kol/
