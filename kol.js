@@ -1,7 +1,7 @@
 /*
  * The KOL site's main page: the Creators list (search, filters, 15 per page) and "Add a creator" by
- * profile link, and the tabs: #creators, #review and #outreach (those two are drawn by review.js through
- * window.KOL). The AI providers and TikTok data panel shows on the Creators tab.
+ * profile link, and the tabs: #creators, #review, #outreach (drawn by review.js) and #dashboard (dashboard.js),
+ * through window.KOL. The AI providers and TikTok data panel shows on the Creators tab.
  */
 (function () {
   'use strict';
@@ -9,7 +9,7 @@
   var $ = function (id) { return document.getElementById(id); };
   var PAGE = 15;
   var state = { data: null, tab: 'creators', search: '', platform: 'All', status: 'All', sort: 'newest', page: 0, addOpen: false, classifying: false, classMsg: '' };
-  var TABS = ['creators', 'review', 'outreach'];
+  var TABS = ['creators', 'review', 'outreach', 'dashboard'];
 
   function tabFromHash() {
     var t = String(location.hash || '').replace(/^#/, '').split('&')[0];
@@ -381,7 +381,7 @@
 
   function renderTabs() {
     var n = { review: reviewQueue().length, outreach: openOutreach().length };
-    var label = { creators: 'Creators', review: 'Review', outreach: 'Outreach' };
+    var label = { creators: 'Creators', review: 'Review', outreach: 'Outreach', dashboard: 'Dashboard' };
     $('tabs').innerHTML = TABS.map(function (t) {
       return '<a href="#' + t + '"' + (state.tab === t ? ' class="on" aria-current="page"' : '') + '>' + label[t] + (n[t] ? ' <span class="cnt">' + n[t] + '</span>' : '') + '</a>';
     }).join('') + '<a href="install.html">Bookmark</a>';
@@ -394,6 +394,7 @@
     $('aipanel').hidden = solo;
     if (state.tab === 'review') return window.KOL.renderReview();
     if (state.tab === 'outreach') return window.KOL.renderOutreach();
+    if (state.tab === 'dashboard') return window.KOL.renderDashboard();
     renderCreators();
   }
 
