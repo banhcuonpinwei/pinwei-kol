@@ -125,20 +125,27 @@
     }).join('') + '</ol>');
     out.push(ai.edit === 'new' ? providerForm(null) : '<button type="button" class="alt small-btn" id="aiadd">Add a provider or key</button>');
     out.push('<p class="small" id="aimsg">' + ai.msg + '</p></div>');
-    out.push(apifyCard(state.data && state.data.apify));
+    out.push(tiktokCard(state.data));
     $('aipanel').innerHTML = out.join('');
     bindAi();
   }
 
   var usd = function (x) { return '$' + Number(x || 0).toFixed(2); };
 
-  /** Apify: this month's spend against the budget, what runs when, what waits, the last runs. */
-  function apifyCard(a) {
-    if (!a) return '';
-    var out = ['<div class="card aicard"><div class="aihead"><b>TikTok via Apify</b></div>'];
+  /** TikTok data: the PW runner (profiles, free) and Apify (the weekly search: spend against the budget, last runs). */
+  function tiktokCard(d) {
+    if (!d || !d.apify) return '';
+    var a = d.apify;
+    var rn = d.runner || {};
+    var out = ['<div class="card aicard"><div class="aihead"><b>TikTok data</b></div>'];
+    var last = rn.last;
+    out.push('<div class="small">' + hint('Profiles: ' + (last ? 'runner ' + esc(ago(last.at)) + ', ' + last.read + ' read' + (last.failed ? ', ' + last.failed + ' failed' : '') : 'runner not run yet') +
+      ' · ' + rn.waiting + ' waiting', 'The PW runner (kol/runner, on an office computer) opens each waiting TikTok profile as a guest, scrolls to the last ' +
+      '30 days and saves what PW creator would read. Free; up to ' + rn.per_run + ' profiles a run. Waiting: new creators, and those read more than ' +
+      'apify_refresh_days ago.' + (last && last.stopped ? '\nLast run stopped: ' + last.stopped : '') + (last && last.message ? '\n' + last.message : '')) + '</div>');
     if (!a.on) {
-      out.push('<p class="small muted">' + hint('Not set up', 'Add APIFY_TOKEN (Apify > Settings > API & Integrations) to Script Properties. ' +
-        'Apify then finds food creators by hashtag and reads their profiles every morning on its own servers; no Pin Wei account is used.') + '</p></div>');
+      out.push('<div class="small muted">' + hint('Search: not set up', 'Add APIFY_TOKEN (Apify > Settings > API & Integrations) to Script Properties. ' +
+        'Apify then searches the food hashtags every week on its own servers and adds the creators it finds; no Pin Wei account is used.') + '</div></div>');
       return out.join('');
     }
     var u = a.usage || {};
@@ -153,9 +160,10 @@
     out.push('<div class="small">' + hint('Search: ' + esc(a.search_day || 'off') + ' 06:00', 'Each ' + (a.search_day || '(no day set)') + ' at 06:00, the newest videos of these ' +
       'hashtags (Config apify_hashtags): #' + a.hashtags.join(' #') + '. Their authors in Vietnam become creators; those outside the follower range or verified are ' +
       'kept but not read further.') + '</div>');
-    out.push('<div class="small">' + hint('Profiles: ' + a.profiles_per_day + ' a day, ' + a.waiting + ' waiting', 'Each morning Apify reads the newest videos of ' +
-      a.profiles_per_day + ' creators: new ones first, then those read more than apify_refresh_days ago. Creators found by the search are classified once ' +
-      'their profile is read.') + '</div>');
+    if (a.profiles_per_day > 0) {
+      out.push('<div class="small">' + hint('Apify backup: ' + a.profiles_per_day + ' profiles a day', 'Apify also reads the newest videos of ' + a.profiles_per_day +
+        ' waiting profiles each morning (Config apify_profiles_per_day, about $0.03 each). Set it to 0 while the runner works.') + '</div>');
+    }
     if (a.runs.length) {
       out.push('<ol class="ailist">' + a.runs.map(function (r) {
         return '<li class="aiitem"><div class="small">' + hint(esc(r.kind) + ' · ' + esc(String(r.started_at).slice(0, 10)) + ' · ' + esc(r.status) +
@@ -322,8 +330,9 @@
   /** "Every morning at 07:00: last run today 07:04, 3 classified." or how to turn it on. */
   function dailyLine(daily) {
     if (!daily) return '';
-    var what = 'Every morning at 06:00 Apify searches TikTok and reads profiles (see the Apify card), and at 07:00 the sheet classifies ' +
-      'new creators (counts first, the AI only when unclear) and recomputes every score. Instagram numbers still come from PW creator.';
+    var what = 'Every morning at 06:00 Apify runs the weekly TikTok search (on its day), and at 07:00 the sheet classifies new creators ' +
+      '(counts first, the AI only when unclear) and recomputes every score. TikTok profiles are read by the PW runner (see TikTok data); ' +
+      'Instagram numbers still come from PW creator.';
     if (!daily.on) return hint('Morning run: off', what + '\nTurn it on in the sheet: Pin Wei KOL > Classify and score every morning.');
     var last = daily.last ? 'last run ' + ago(daily.last.at) : 'not run yet';
     return hint('Morning run: on, 0' + daily.hour + ':00 · ' + esc(last), what + (daily.last ? '\nLast run: ' + daily.last.message : ''));
@@ -372,7 +381,7 @@
     out.push('<p class="qsum">' + list.length + (list.length === d.creators.length ? '' : ' of ' + d.creators.length) + ' creators' + ai +
       ' <span class="small" id="cmsg">' + state.classMsg + '</span></p>');
     out.push('<p class="small muted">' + dailyLine(d.daily) + (due ? ' · ' + hint('<span class="warnc">' + due + ' to capture again</span>',
-      'Their last capture is a week old or more: open each profile and click PW creator. TikTok creators are read by Apify when it is set up; ' +
+      'Their last capture is a week old or more: open each profile and click PW creator. TikTok creators are read by the PW runner; ' +
       'Instagram ones need the click (nothing logs in with a Pin Wei account).') : '') + '</p>');
     if (!d.creators.length) {
       out.push('<p class="note">No creators yet. Paste a profile link above, or open a profile on Instagram or TikTok and click the ' +
